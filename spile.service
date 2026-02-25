@@ -1,0 +1,15 @@
+[Unit]
+Description=spile — claude.ai conversation export server
+After=network.target tailscaled.service
+
+[Service]
+Type=simple
+User=moltbot
+WorkingDirectory=/home/moltbot/spile
+EnvironmentFile=/home/moltbot/spile/.env
+ExecStart=/usr/bin/node --experimental-strip-types src/server.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

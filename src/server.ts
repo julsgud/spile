@@ -5,6 +5,7 @@ import { logger } from 'hono/logger'
 import type { SpileAdapter } from './types.ts'
 
 const PORT = parseInt(process.env.SPILE_PORT ?? '7842', 10)
+const HOST = process.env.SPILE_HOST ?? '127.0.0.1'
 
 // Load adapter from spile.config.ts — user owns this file
 let adapter: SpileAdapter
@@ -50,6 +51,6 @@ app.post('/import', async c => {
   }
 })
 
-serve({ fetch: app.fetch, port: PORT, hostname: '127.0.0.1' }, () => {
-  console.log(`spile listening on http://127.0.0.1:${PORT}`)
+serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
+  console.log(`spile listening on http://${HOST}:${PORT}`)
 })
