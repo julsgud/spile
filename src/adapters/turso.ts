@@ -1,0 +1,219 @@
+import type { Conversation, ImportResult, SpileAdapter } from '../types.ts'
+
+interface TursoArg {
+  type: 'text' | 'integer' | 'null'
+  value: string | number | null
+}
+
+interface TursoStatement {
+  sql: string
+  args: TursoArg[]
+}
+
+const t = (v?: string | null): TursoArg =>
+  v == null ? { type: 'null', value: null } : { type: 'text', value: v }
+
+const n = (v?: number | null): TursoArg =>
+  v == null || isNaN(v) ? { type: 'null', value: null } : { type: 'integer', value: Math.round(v) }
+
+const b = (v?: boolean | null): TursoArg =>
+  v == null ? { type: 'null', value: null } : { type: 'integer', value: v ? 1 : 0 }
+
+function isoToMs(s?: string | null): TursoArg {
+  if (!s) return { type: 'null', value: null }
+  const ms = Date.parse(s)
+  return isNaN(ms) ? { type: 'null', value: null } : { type: 'integer', value: ms }
+}
+
+const BATCH = 100
+
+async function tursoExec(url: string, token: string, statements: TursoStatement[]): Promise<void> {
+  const resp = await fetch(`${url}/v2/pipeline`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requests: [
+        ...statements.map(stmt => ({ type: 'execute', stmt })),
+        { type: 'close' },
+      ],
+    }),
+  })
+  if (!resp.ok) {
+    throw new Error(`Turso HTTP ${resp.status}: ${await resp.text()}`)
+  }
+  const data = (await resp.json()) as {
+    results?: Array<{ type: string; error?: { message: string } }>
+  }
+  const errs = (data.results ?? [])
+    .filter(r => r.type === 'error')
+    .map(r => r.error?.message ?? 'unknown')
+  if (errs.length > 0) throw new Error(`Turso SQL: ${errs.join('; ')}`)
+}
+
+async function flush(
+  url: string,
+  token: string,
+  batch: TursoStatement[],
+  counter: { n: number },
+): Promise<void> {
+  if (!batch.length) return
+  counter.n += batch.length
+  await tursoExec(url, token, batch)
+  batch.length = 0
+}
+
+const INIT_SQL = `
+CREATE TABLE IF NOT EXISTS ai_sessions (
+  id                        TEXT PRIMARY KEY,
+  name                      TEXT,
+  summary                   TEXT,
+  model                     TEXT,
+  platform                  TEXT,
+  is_starred                INTEGER,
+  is_temporary              INTEGER,
+  created_at                INTEGER,
+  updated_at                INTEGER,
+  current_leaf_message_uuid TEXT
+);
+CREATE TABLE IF NOT EXISTS ai_messages (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id          TEXT NOT NULL REFERENCES ai_sessions(id),
+  uuid                TEXT,
+  parent_uuid         TEXT,
+  sender              TEXT,
+  index_pos           INTEGER,
+  input_mode          TEXT,
+  truncated           INTEGER,
+  stop_reason         TEXT,
+  text                TEXT,
+  content             TEXT,
+  files               TEXT,
+  attachments         TEXT,
+  sync_sources        TEXT,
+  created_at          INTEGER,
+  updated_at          INTEGER
+);
+CREATE TABLE IF NOT EXISTS ai_content_blocks (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id      INTEGER NOT NULL REFERENCES ai_messages(id),
+  seq             INTEGER NOT NULL,
+  type            TEXT,
+  text            TEXT,
+  thinking        TEXT,
+  citations       TEXT,
+  summaries       TEXT,
+  cut_off         INTEGER,
+  start_timestamp TEXT,
+  stop_timestamp  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_session  ON ai_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_ai_blocks_message    ON ai_content_blocks(message_id);
+`
+
+export interface TursoAdapterOptions {
+  url: string
+  authToken: string
+}
+
+export class TursoAdapter implements SpileAdapter {
+  private url: string
+  private token: string
+  private initialized = false
+
+  constructor(opts: TursoAdapterOptions) {
+    this.url = opts.url
+    this.token = opts.authToken
+  }
+
+  private async ensureSchema(): Promise<void> {
+    if (this.initialized) return
+    const stmts = INIT_SQL
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+      .map(sql => ({ sql, args: [] }))
+    await tursoExec(this.url, this.token, stmts)
+    this.initialized = true
+  }
+
+  async exportConversation(conv: Conversation): Promise<ImportResult> {
+    const start = Date.now()
+    await this.ensureSchema()
+
+    const { uuid: sessionId, chat_messages: messages = [] } = conv
+    if (!sessionId) throw new Error('Missing conversation uuid')
+
+    await tursoExec(this.url, this.token, [{
+      sql: `INSERT INTO ai_sessions
+        (id, name, summary, model, platform, is_starred, is_temporary,
+         created_at, updated_at, current_leaf_message_uuid)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name, summary=excluded.summary,
+          model=excluded.model, updated_at=excluded.updated_at`,
+      args: [
+        t(conv.uuid), t(conv.name), t(conv.summary), t(conv.model),
+        t(conv.platform), b(conv.is_starred), b(conv.is_temporary),
+        isoToMs(conv.created_at), isoToMs(conv.updated_at),
+        t(conv.current_leaf_message_uuid),
+      ],
+    }])
+
+    const batch: TursoStatement[] = []
+    const counter = { n: 0 }
+    let blockCount = 0
+
+    for (const msg of messages) {
+      batch.push({
+        sql: `INSERT OR IGNORE INTO ai_messages
+          (session_id, uuid, parent_uuid, sender, index_pos, input_mode,
+           truncated, stop_reason, text, content, files, attachments,
+           sync_sources, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        args: [
+          t(sessionId), t(msg.uuid), t(msg.parent_message_uuid),
+          t(msg.sender), n(msg.index), t(msg.input_mode),
+          b(msg.truncated), t(msg.stop_reason), t(msg.text),
+          t(msg.content ? JSON.stringify(msg.content) : null),
+          t(msg.files ? JSON.stringify(msg.files) : null),
+          t(msg.attachments ? JSON.stringify(msg.attachments) : null),
+          t(msg.sync_sources ? JSON.stringify(msg.sync_sources) : null),
+          isoToMs(msg.created_at), isoToMs(msg.updated_at),
+        ],
+      })
+
+      if (batch.length >= BATCH) await flush(this.url, this.token, batch, counter)
+
+      for (const [seq, block] of (msg.content ?? []).entries()) {
+        batch.push({
+          sql: `INSERT OR IGNORE INTO ai_content_blocks
+            (message_id, seq, type, text, thinking, citations, summaries,
+             cut_off, start_timestamp, stop_timestamp)
+            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            FROM ai_messages WHERE uuid = ? AND session_id = ?`,
+          args: [
+            n(seq), t(block.type), t(block.text), t(block.thinking),
+            t(block.citations ? JSON.stringify(block.citations) : null),
+            t(block.summaries ? JSON.stringify(block.summaries) : null),
+            b(block.cut_off), t(block.start_timestamp), t(block.stop_timestamp),
+            t(msg.uuid), t(sessionId),
+          ],
+        })
+        blockCount++
+        if (batch.length >= BATCH) await flush(this.url, this.token, batch, counter)
+      }
+    }
+
+    await flush(this.url, this.token, batch, counter)
+
+    return {
+      session_id: sessionId,
+      messages: messages.length,
+      blocks: blockCount,
+      elapsed_ms: Date.now() - start,
+    }
+  }
+}
