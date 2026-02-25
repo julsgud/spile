@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "A tiny local server that taps your claude.ai conversations into your own store",
   "license": "MIT",
+  "type": "module",
   "packageManager": "pnpm@10",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
