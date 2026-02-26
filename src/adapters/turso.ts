@@ -170,6 +170,11 @@ export class TursoAdapter implements SpileAdapter {
     let blockCount = 0
 
     for (const msg of messages) {
+      // Derive flat text from content blocks — msg.text is empty in claude.ai API responses
+      const flatText = msg.text ||
+        (msg.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '').join('\n') ||
+        null
+
       batch.push({
         sql: `INSERT OR IGNORE INTO ai_messages
           (session_id, uuid, parent_uuid, sender, seq, input_mode,
@@ -179,7 +184,7 @@ export class TursoAdapter implements SpileAdapter {
         args: [
           t(sessionId), t(msg.uuid), t(msg.parent_message_uuid),
           t(msg.sender), n(msg.index), t(msg.input_mode),
-          b(msg.truncated), t(msg.stop_reason), t(msg.text),
+          b(msg.truncated), t(msg.stop_reason), t(flatText),
           t(msg.files ? JSON.stringify(msg.files) : null),
           t(msg.attachments ? JSON.stringify(msg.attachments) : null),
           t(msg.sync_sources ? JSON.stringify(msg.sync_sources) : null),
