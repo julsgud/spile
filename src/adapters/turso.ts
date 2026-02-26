@@ -176,11 +176,14 @@ export class TursoAdapter implements SpileAdapter {
         null
 
       batch.push({
-        sql: `INSERT OR IGNORE INTO ai_messages
+        sql: `INSERT INTO ai_messages
           (session_id, uuid, parent_uuid, sender, seq, input_mode,
            truncated, stop_reason, text, files_json, attachments_json,
            sync_sources_json, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(session_id, uuid) DO UPDATE SET
+            text=excluded.text, stop_reason=excluded.stop_reason,
+            updated_at=excluded.updated_at`,
         args: [
           t(sessionId), t(msg.uuid), t(msg.parent_message_uuid),
           t(msg.sender), n(msg.index), t(msg.input_mode),
