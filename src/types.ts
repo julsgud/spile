@@ -38,12 +38,14 @@ export interface Conversation {
   updated_at?: string
   current_leaf_message_uuid?: string
   chat_messages?: ChatMessage[]
+  captured_files?: string[]
 }
 
 export interface ImportResult {
   session_id: string
   messages: number
   blocks: number
+  files: number
   elapsed_ms: number
 }
 
