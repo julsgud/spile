@@ -35,16 +35,44 @@
     return
   }
 
+  // Extract file paths from React fiber tree via Download buttons
+  function extractFilePaths() {
+    const paths = []
+    document.querySelectorAll('[aria-label="Download"]').forEach(btn => {
+      const fiberKey = Object.keys(btn).find(k => k.startsWith('__reactFiber'))
+      if (!fiberKey) return
+      let fiber = btn[fiberKey]
+      let depth = 0
+      while (fiber && depth < 20) {
+        const props = fiber.memoizedProps
+        if (props) {
+          for (const v of Object.values(props)) {
+            if (typeof v === 'string' && v.includes('/mnt/user-data/')) {
+              paths.push(v)
+              return
+            }
+          }
+        }
+        fiber = fiber.return
+        depth++
+      }
+    })
+    return [...new Set(paths)]
+  }
+
+  const capturedFiles = extractFilePaths()
+
   // POST to spile server
   try {
     const resp = await fetch('http://127.0.0.1:7842/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(conv),
+      body: JSON.stringify({ ...conv, captured_files: capturedFiles }),
     })
     const result = await resp.json()
     if (result.ok) {
-      alert(`spile: imported ${result.messages} messages (${result.elapsed_ms}ms)`)
+      const filePart = result.files > 0 ? `, ${result.files} file(s)` : ''
+      alert(`spile: imported ${result.messages} messages${filePart} (${result.elapsed_ms}ms)`)
     } else {
       alert(`spile: error — ${result.error}`)
     }
