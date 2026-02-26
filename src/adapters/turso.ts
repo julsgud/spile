@@ -100,13 +100,14 @@ CREATE TABLE IF NOT EXISTS ai_content_blocks (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   message_id      INTEGER NOT NULL REFERENCES ai_messages(id),
   seq             INTEGER NOT NULL,
-  type            TEXT,
+  type            TEXT NOT NULL,
   text            TEXT,
   thinking        TEXT,
-  summaries       TEXT,
-  cut_off         INTEGER,
-  start_timestamp TEXT,
-  stop_timestamp  TEXT
+  citations_json  TEXT,
+  summaries_json  TEXT,
+  cut_off         INTEGER NOT NULL DEFAULT 0,
+  start_timestamp INTEGER,
+  stop_timestamp  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_ai_messages_session  ON ai_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_ai_blocks_message    ON ai_content_blocks(message_id);
@@ -188,14 +189,15 @@ export class TursoAdapter implements SpileAdapter {
       for (const [seq, block] of (msg.content ?? []).entries()) {
         batch.push({
           sql: `INSERT OR IGNORE INTO ai_content_blocks
-            (message_id, seq, type, text, thinking, summaries,
+            (message_id, seq, type, text, thinking, citations_json, summaries_json,
              cut_off, start_timestamp, stop_timestamp)
-            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?
+            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?
             FROM ai_messages WHERE uuid = ? AND session_id = ?`,
           args: [
             n(seq), t(block.type), t(block.text), t(block.thinking),
+            t(block.citations ? JSON.stringify(block.citations) : null),
             t(block.summaries ? JSON.stringify(block.summaries) : null),
-            b(block.cut_off), t(block.start_timestamp), t(block.stop_timestamp),
+            b(block.cut_off), isoToMs(block.start_timestamp), isoToMs(block.stop_timestamp),
             t(msg.uuid), t(sessionId),
           ],
         })
