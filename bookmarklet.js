@@ -64,7 +64,7 @@
 
   // POST to spile server
   try {
-    const resp = await fetch('http://127.0.0.1:7842/import', {
+    const resp = await fetch('https://botilcetin.tail67efd7.ts.net/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...conv, captured_files: capturedFiles }),
