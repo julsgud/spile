@@ -2,7 +2,7 @@ import type { Conversation, ImportResult, SpileAdapter } from '../types.ts'
 
 interface TursoArg {
   type: 'text' | 'integer' | 'null'
-  value: string | number | null
+  value: string | null
 }
 
 interface TursoStatement {
@@ -10,19 +10,20 @@ interface TursoStatement {
   args: TursoArg[]
 }
 
+// Turso HTTP API requires all values to be strings, even for integer types
 const t = (v?: string | null): TursoArg =>
   v == null ? { type: 'null', value: null } : { type: 'text', value: v }
 
 const n = (v?: number | null): TursoArg =>
-  v == null || isNaN(v) ? { type: 'null', value: null } : { type: 'integer', value: Math.round(v) }
+  v == null || isNaN(v) ? { type: 'null', value: null } : { type: 'integer', value: String(Math.round(v)) }
 
 const b = (v?: boolean | null): TursoArg =>
-  v == null ? { type: 'null', value: null } : { type: 'integer', value: v ? 1 : 0 }
+  v == null ? { type: 'null', value: null } : { type: 'integer', value: v ? '1' : '0' }
 
 function isoToMs(s?: string | null): TursoArg {
   if (!s) return { type: 'null', value: null }
   const ms = Date.parse(s)
-  return isNaN(ms) ? { type: 'null', value: null } : { type: 'integer', value: ms }
+  return isNaN(ms) ? { type: 'null', value: null } : { type: 'integer', value: String(ms) }
 }
 
 const BATCH = 100
