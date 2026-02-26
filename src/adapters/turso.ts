@@ -82,19 +82,18 @@ CREATE TABLE IF NOT EXISTS ai_sessions (
 CREATE TABLE IF NOT EXISTS ai_messages (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id          TEXT NOT NULL REFERENCES ai_sessions(id),
-  uuid                TEXT,
+  uuid                TEXT NOT NULL,
   parent_uuid         TEXT,
-  sender              TEXT,
-  index_pos           INTEGER,
+  sender              TEXT NOT NULL,
+  seq                 INTEGER NOT NULL,
   input_mode          TEXT,
-  truncated           INTEGER,
+  truncated           INTEGER NOT NULL DEFAULT 0,
   stop_reason         TEXT,
   text                TEXT,
-  content             TEXT,
-  files               TEXT,
-  attachments         TEXT,
-  sync_sources        TEXT,
-  created_at          INTEGER,
+  files_json          TEXT,
+  attachments_json    TEXT,
+  sync_sources_json   TEXT,
+  created_at          INTEGER NOT NULL,
   updated_at          INTEGER
 );
 CREATE TABLE IF NOT EXISTS ai_content_blocks (
@@ -104,7 +103,6 @@ CREATE TABLE IF NOT EXISTS ai_content_blocks (
   type            TEXT,
   text            TEXT,
   thinking        TEXT,
-  citations       TEXT,
   summaries       TEXT,
   cut_off         INTEGER,
   start_timestamp TEXT,
@@ -170,15 +168,14 @@ export class TursoAdapter implements SpileAdapter {
     for (const msg of messages) {
       batch.push({
         sql: `INSERT OR IGNORE INTO ai_messages
-          (session_id, uuid, parent_uuid, sender, index_pos, input_mode,
-           truncated, stop_reason, text, content, files, attachments,
-           sync_sources, created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          (session_id, uuid, parent_uuid, sender, seq, input_mode,
+           truncated, stop_reason, text, files_json, attachments_json,
+           sync_sources_json, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         args: [
           t(sessionId), t(msg.uuid), t(msg.parent_message_uuid),
           t(msg.sender), n(msg.index), t(msg.input_mode),
           b(msg.truncated), t(msg.stop_reason), t(msg.text),
-          t(msg.content ? JSON.stringify(msg.content) : null),
           t(msg.files ? JSON.stringify(msg.files) : null),
           t(msg.attachments ? JSON.stringify(msg.attachments) : null),
           t(msg.sync_sources ? JSON.stringify(msg.sync_sources) : null),
@@ -191,13 +188,12 @@ export class TursoAdapter implements SpileAdapter {
       for (const [seq, block] of (msg.content ?? []).entries()) {
         batch.push({
           sql: `INSERT OR IGNORE INTO ai_content_blocks
-            (message_id, seq, type, text, thinking, citations, summaries,
+            (message_id, seq, type, text, thinking, summaries,
              cut_off, start_timestamp, stop_timestamp)
-            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?
             FROM ai_messages WHERE uuid = ? AND session_id = ?`,
           args: [
             n(seq), t(block.type), t(block.text), t(block.thinking),
-            t(block.citations ? JSON.stringify(block.citations) : null),
             t(block.summaries ? JSON.stringify(block.summaries) : null),
             b(block.cut_off), t(block.start_timestamp), t(block.stop_timestamp),
             t(msg.uuid), t(sessionId),
