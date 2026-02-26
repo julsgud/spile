@@ -111,6 +111,13 @@ CREATE TABLE IF NOT EXISTS ai_content_blocks (
 );
 CREATE INDEX IF NOT EXISTS idx_ai_messages_session  ON ai_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_ai_blocks_message    ON ai_content_blocks(message_id);
+CREATE TABLE IF NOT EXISTS ai_session_files (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT    NOT NULL REFERENCES sessions(id),
+  path       TEXT    NOT NULL,
+  UNIQUE(session_id, path)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_session_files_session ON ai_session_files(session_id);
 `
 
 export interface TursoAdapterOptions {
@@ -164,6 +171,15 @@ export class TursoAdapter implements SpileAdapter {
         t(conv.current_leaf_message_uuid),
       ],
     }])
+
+    // Store captured file paths (from bookmarklet DOM scraping)
+    const capturedFiles = conv.captured_files ?? []
+    if (capturedFiles.length > 0) {
+      await tursoExec(this.url, this.token, capturedFiles.map(path => ({
+        sql: `INSERT OR IGNORE INTO ai_session_files (session_id, path) VALUES (?, ?)`,
+        args: [t(sessionId), t(path)],
+      })))
+    }
 
     const batch: TursoStatement[] = []
     const counter = { n: 0 }
@@ -223,6 +239,7 @@ export class TursoAdapter implements SpileAdapter {
       session_id: sessionId,
       messages: messages.length,
       blocks: blockCount,
+      files: capturedFiles.length,
       elapsed_ms: Date.now() - start,
     }
   }
