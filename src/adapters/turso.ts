@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS ai_content_blocks (
   seq             INTEGER NOT NULL,
   type            TEXT NOT NULL,
   text            TEXT,
-  thinking        TEXT,
   citations_json  TEXT,
   summaries_json  TEXT,
   cut_off         INTEGER NOT NULL DEFAULT 0,
@@ -186,15 +185,15 @@ export class TursoAdapter implements SpileAdapter {
 
       if (batch.length >= BATCH) await flush(this.url, this.token, batch, counter)
 
-      for (const [seq, block] of (msg.content ?? []).entries()) {
+      for (const [seq, block] of (msg.content ?? []).filter(b => b.type !== 'thinking').entries()) {
         batch.push({
           sql: `INSERT OR IGNORE INTO ai_content_blocks
-            (message_id, seq, type, text, thinking, citations_json, summaries_json,
+            (message_id, seq, type, text, citations_json, summaries_json,
              cut_off, start_timestamp, stop_timestamp)
-            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            SELECT id, ?, ?, ?, ?, ?, ?, ?, ?
             FROM ai_messages WHERE uuid = ? AND session_id = ?`,
           args: [
-            n(seq), t(block.type), t(block.text), t(block.thinking),
+            n(seq), t(block.type), t(block.text),
             t(block.citations ? JSON.stringify(block.citations) : null),
             t(block.summaries ? JSON.stringify(block.summaries) : null),
             b(block.cut_off), isoToMs(block.start_timestamp), isoToMs(block.stop_timestamp),
