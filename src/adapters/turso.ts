@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   is_temporary    INTEGER NOT NULL DEFAULT 0,
   started_at      INTEGER NOT NULL DEFAULT 0,
   updated_at      INTEGER,
-  current_leaf_message_uuid TEXT
+  current_leaf_message_uuid TEXT,
+  message_count   INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS ai_messages (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +121,11 @@ CREATE TABLE IF NOT EXISTS ai_session_files (
 CREATE INDEX IF NOT EXISTS idx_ai_session_files_session ON ai_session_files(session_id);
 `
 
+// Migrations for existing databases — each runs independently, errors ignored (e.g. column already exists)
+const MIGRATIONS = [
+  `ALTER TABLE sessions ADD COLUMN message_count INTEGER NOT NULL DEFAULT 0`,
+]
+
 export interface TursoAdapterOptions {
   url: string
   authToken: string
@@ -143,6 +149,9 @@ export class TursoAdapter implements SpileAdapter {
       .filter(s => s.length > 0)
       .map(sql => ({ sql, args: [] }))
     await tursoExec(this.url, this.token, stmts)
+    for (const sql of MIGRATIONS) {
+      try { await tursoExec(this.url, this.token, [{ sql, args: [] }]) } catch { /* already applied */ }
+    }
     this.initialized = true
   }
 
@@ -156,12 +165,13 @@ export class TursoAdapter implements SpileAdapter {
     await tursoExec(this.url, this.token, [{
       sql: `INSERT INTO sessions
         (id, source, name, summary, model, platform, is_starred, is_temporary,
-         started_at, updated_at, current_leaf_message_uuid)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         started_at, updated_at, current_leaf_message_uuid, message_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, summary=excluded.summary,
           model=excluded.model, updated_at=excluded.updated_at,
-          current_leaf_message_uuid=excluded.current_leaf_message_uuid`,
+          current_leaf_message_uuid=excluded.current_leaf_message_uuid,
+          message_count=excluded.message_count`,
       args: [
         t(conv.uuid), t('claude_ai'),
         t(conv.name ?? 'Untitled'),
@@ -169,6 +179,7 @@ export class TursoAdapter implements SpileAdapter {
         b(conv.is_starred), b(conv.is_temporary),
         isoToMs(conv.created_at), isoToMs(conv.updated_at),
         t(conv.current_leaf_message_uuid),
+        n(messages.length),
       ],
     }])
 
