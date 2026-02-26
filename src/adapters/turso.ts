@@ -197,7 +197,7 @@ export class TursoAdapter implements SpileAdapter {
 
       if (batch.length >= BATCH) await flush(this.url, this.token, batch, counter)
 
-      for (const [seq, block] of (msg.content ?? []).filter(b => b.type !== 'thinking').entries()) {
+      for (const [seq, block] of (msg.content ?? []).filter(b => b.type === 'text').entries()) {
         batch.push({
           sql: `INSERT OR IGNORE INTO ai_content_blocks
             (message_id, seq, type, text, citations_json, summaries_json,
