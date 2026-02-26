@@ -67,21 +67,22 @@ async function flush(
 }
 
 const INIT_SQL = `
-CREATE TABLE IF NOT EXISTS ai_sessions (
-  id                        TEXT PRIMARY KEY,
-  name                      TEXT,
-  summary                   TEXT,
-  model                     TEXT,
-  platform                  TEXT,
-  is_starred                INTEGER,
-  is_temporary              INTEGER,
-  created_at                INTEGER,
-  updated_at                INTEGER,
+CREATE TABLE IF NOT EXISTS sessions (
+  id              TEXT    PRIMARY KEY,
+  source          TEXT    NOT NULL DEFAULT 'claude_ai',
+  name            TEXT    NOT NULL,
+  summary         TEXT,
+  model           TEXT,
+  platform        TEXT,
+  is_starred      INTEGER NOT NULL DEFAULT 0,
+  is_temporary    INTEGER NOT NULL DEFAULT 0,
+  started_at      INTEGER NOT NULL DEFAULT 0,
+  updated_at      INTEGER,
   current_leaf_message_uuid TEXT
 );
 CREATE TABLE IF NOT EXISTS ai_messages (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id          TEXT NOT NULL REFERENCES ai_sessions(id),
+  session_id          TEXT NOT NULL REFERENCES sessions(id),
   uuid                TEXT NOT NULL,
   parent_uuid         TEXT,
   sender              TEXT NOT NULL,
@@ -146,16 +147,19 @@ export class TursoAdapter implements SpileAdapter {
     if (!sessionId) throw new Error('Missing conversation uuid')
 
     await tursoExec(this.url, this.token, [{
-      sql: `INSERT INTO ai_sessions
-        (id, name, summary, model, platform, is_starred, is_temporary,
-         created_at, updated_at, current_leaf_message_uuid)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+      sql: `INSERT INTO sessions
+        (id, source, name, summary, model, platform, is_starred, is_temporary,
+         started_at, updated_at, current_leaf_message_uuid)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name, summary=excluded.summary,
-          model=excluded.model, updated_at=excluded.updated_at`,
+          model=excluded.model, updated_at=excluded.updated_at,
+          current_leaf_message_uuid=excluded.current_leaf_message_uuid`,
       args: [
-        t(conv.uuid), t(conv.name), t(conv.summary), t(conv.model),
-        t(conv.platform), b(conv.is_starred), b(conv.is_temporary),
+        t(conv.uuid), t('claude_ai'),
+        t(conv.name ?? 'Untitled'),
+        t(conv.summary), t(conv.model), t(conv.platform),
+        b(conv.is_starred), b(conv.is_temporary),
         isoToMs(conv.created_at), isoToMs(conv.updated_at),
         t(conv.current_leaf_message_uuid),
       ],
